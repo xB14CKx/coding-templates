@@ -1,0 +1,343 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // WARROOM is the default entry point. The user can still @-mention any unit
+  // directly — every agent in .opencode/agents/ is `mode: all`.
+  "default_agent": "warroom",
+
+  // The session default. THIS MUST BE SET on a free-tier account. Left unset,
+  // opencode falls back to whatever its provider default happens to be — which
+  // on this account resolved to `openrouter/unbiased/pareto-26.9`, a paid
+  // model. With zero credits purchased that returns HTTP 402 "Insufficient
+  // credits" and every session dies before the first token.
+  //
+  // `big-pickle` is priced 0/0/0 on the `opencode` provider. Do not swap it
+  // for a model without a `-free` suffix without checking `cost` first — see
+  // .opencode/brain/pitfalls/model-catalog-is-not-truth.md.
+  "model": "opencode/big-pickle",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BLOCK 0 — SPEED
+  //
+  // `small_model` is LEGACY on the CLI this repo pins (v2.0.27). Read in the
+  // binary it resolves to exactly one thing: the model that generates session
+  // titles. It does NOT steer summary or compaction. Those are separate scopes —
+  // `opencode debug agents` lists `compaction`, `summary`, and `title` as
+  // distinct entries, and only `title` accepts the value. If the ID does not
+  // resolve, the CLI drops it with the diagnostic "omitted unsupported legacy
+  // model reference" and carries on.
+  //
+  // Left unset it falls back to the first active text model the provider
+  // exposes whose family is gpt-luna, gemini-flash-lite, gemini-flash, or
+  // claude-haiku — and to the session model if the provider exposes none of
+  // those. `opencode models` prints no family column, so you cannot predict
+  // which branch you land in; measure it on your own account before relying on
+  // it.
+  //
+  // NOTE: this repo pins `@opencode-ai/plugin` 1.18.22 (1.x) against a 2.x CLI.
+  // Anything written against the plugin SDK may lag the CLI you are running.
+  //
+  // All units inherit the session model (top-level `model`). No per-unit
+  // tiering — Block 3 carries only cross-cutting scope.
+  // ─────────────────────────────────────────────────────────────────────────
+  // "small_model": "anthropic/claude-haiku-4-5",
+
+  // Compaction replaces older conversation with a structured summary. Raise
+  // `keep.tokens` when a long session needs exact recent detail; lower it to
+  // compact sooner and leave more room. The default is 15000.
+  "compaction": {
+    "auto": true,
+    "keep": { "tokens": 20000 }
+  },
+
+  // Session warming keeps a provider-side prompt cache alive while you pause.
+  // It is OFF by default because every warming request is a real, billed model
+  // call. Enable it only if your provider charges a premium for a cold cache.
+  // "warming": { "interval": "4 minutes", "duration": "30 minutes" },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BLOCK 1 — HARD DENIES
+  //
+  // Policies are evaluated AFTER agent permissions and after saved "Allow
+  // always" approvals, and they only ever remove access. Nothing here can be
+  // re-enabled by a prompt or by a project-local config.
+  //
+  // To let the agent manage git itself, delete the whole git group below.
+  //
+  // NOTE: these live under `experimental` because v2.0.27 ignores a top-level
+  // `policies` key and silently drops it. `experimental.policies` is the
+  // compatibility path and merges into top-level `policies` once the build
+  // accepts it. When it does, this array can move up one level with no other
+  // change.
+  // ─────────────────────────────────────────────────────────────────────────
+  "experimental": {
+    "policies": [
+      // --- git: deny everything, then re-allow the read-only inspection set ---
+      // `shell:git *` also matches bare `shell:git`, so the bare form is
+      // re-allowed explicitly below.
+      { "action": "tool.use", "resource": "shell:git *", "effect": "deny" },
+
+      { "action": "tool.use", "resource": "shell:git", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git status*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git diff*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git log*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git show*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git blame*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git grep*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git shortlog*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git whatchanged*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git ls-files*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git ls-tree*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git rev-parse*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git rev-list*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git describe*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git for-each-ref*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git merge-base*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git name-rev*", "effect": "allow" },
+      // `git cat-file` can dump any blob, including a secret pulled from history.
+      { "action": "tool.use", "resource": "shell:git cat-file*", "effect": "deny" },
+      // `git cherry` only lists; `git cherry-pick` writes. Last match wins, so
+      // the narrow deny must come AFTER the broad allow.
+      { "action": "tool.use", "resource": "shell:git cherry*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git cherry-pick*", "effect": "deny" },
+
+      // `show-ref --delete` and `reflog delete|expire` write state, so the bare
+      // read-only forms are re-allowed after a blanket deny.
+      { "action": "tool.use", "resource": "shell:git show-ref*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git show-ref", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git show-ref --verify *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git reflog *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git reflog", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git reflog show*", "effect": "allow" },
+
+      // `git branch` accepts clustered short flags: `git branch -ad <name>` is a
+      // delete. So only exact, flag-free forms are allowed. For formatted
+      // listings use `git for-each-ref "--format=%(refname:short)"` instead.
+      { "action": "tool.use", "resource": "shell:git branch *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git branch", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch -a", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch -r", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch -v", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --list", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --show-current", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --contains *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --merged *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --points-at *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --format *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git branch --sort *", "effect": "allow" },
+
+      { "action": "tool.use", "resource": "shell:git tag *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git tag", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git tag -l*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git tag -n*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git tag --list*", "effect": "allow" },
+
+      // NOTE: bare `git stash` is a PUSH, not a list, so no bare form is re-allowed.
+      { "action": "tool.use", "resource": "shell:git stash *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git stash list*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git stash show*", "effect": "allow" },
+
+      { "action": "tool.use", "resource": "shell:git remote *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git remote", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git remote -v", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git remote show *", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git remote get-url *", "effect": "allow" },
+
+      { "action": "tool.use", "resource": "shell:git worktree *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git worktree", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git worktree list*", "effect": "allow" },
+
+      { "action": "tool.use", "resource": "shell:git config *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git config", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git config --get*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git config --list*", "effect": "allow" },
+
+      // A global flag before the subcommand defeats every `git <cmd>*` pattern
+      // above — `git -C dir status` never matches `git status*` and would fall
+      // into the blanket deny. Cover the common read-only forms explicitly.
+      { "action": "tool.use", "resource": "shell:git -C * status*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * log*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * diff*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * show*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * ls-files*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * rev-parse*", "effect": "allow" },
+      { "action": "tool.use", "resource": "shell:git -C * blame*", "effect": "allow" },
+
+      // Narrow re-deny: read-only git inspection must not become a way to pull a
+      // committed secret back out of history.
+      { "action": "tool.use", "resource": "shell:git show *.env", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git show *.env.*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git show *Secrets/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:git grep *Secrets/*", "effect": "deny" },
+
+      // --- publishing: no PR, release, or repository mutation from here ---
+      { "action": "tool.use", "resource": "shell:gh *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:hub *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:glab *", "effect": "deny" },
+
+      // --- privilege escalation and blunt destructive commands ---
+      { "action": "tool.use", "resource": "shell:sudo *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:su *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:doas *", "effect": "deny" },
+      // Only the catastrophic forms are hard-denied. `rm -rf /tmp/x` is NOT here —
+// that is recoverable and is handled by the `ask` rules in Block 2, so the
+// developer can still approve it.
+//
+// Known gap: `rm -rf /*` cannot be hard-denied here. Matching an argument that
+// is literally `/*` would need an escaped asterisk, and the policy language has
+// no escape for `*` — the only pattern that catches it also matches every other
+// absolute path. It falls through to the `rm -rf *` ask rule in Block 2, where
+// the developer sees the exact command and approves or rejects. The space in
+// the pattern below is load-bearing.
+{ "action": "tool.use", "resource": "shell:rm -rf /", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf / *", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf ~", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf ~/", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf $HOME", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:rm -rf $HOME/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:mkfs*", "effect": "deny" },
+      { "action": "tool.use", "resource": "shell:dd if=*", "effect": "deny" },
+
+      // --- secrets: hard-deny reads and writes of real secret material ---
+      // `*` spans `/`, so `*.env` also matches `services/api/.env`.
+      { "action": "tool.use", "resource": "read:*.env", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.env.*", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*Secrets/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.ssh/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.aws/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.gnupg/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.npmrc", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.pypirc", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.netrc", "effect": "deny" },
+      { "action": "tool.use", "resource": "read:*.pem", "effect": "deny" },
+      { "action": "tool.use", "resource": "edit:*.env", "effect": "deny" },
+      { "action": "tool.use", "resource": "edit:*.env.*", "effect": "deny" },
+      { "action": "tool.use", "resource": "edit:*Secrets/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "edit:*.ssh/*", "effect": "deny" },
+      { "action": "tool.use", "resource": "edit:*.npmrc", "effect": "deny" },
+
+      // Committed examples are documentation, not secrets — keep them readable.
+      { "action": "tool.use", "resource": "read:*.env.example", "effect": "allow" },
+      { "action": "tool.use", "resource": "read:*.env.template", "effect": "allow" },
+      { "action": "tool.use", "resource": "read:*.env.sample", "effect": "allow" },
+      { "action": "tool.use", "resource": "read:*example.env*", "effect": "allow" }
+    ]
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BLOCK 2 — PROMPT-WORTHY OPERATIONS
+  //
+  // The base policy allows everything, which is what makes the setup fast. The
+  // trade is that consequential commands are silent unless listed here. Tune
+  // this block to taste: delete a line to remove the prompt, add a line to add
+  // one. Nothing here is a security boundary — that is Block 1.
+  // ─────────────────────────────────────────────────────────────────────────
+  "permissions": [
+    // Network fetch and remote access.
+    { "action": "shell", "resource": "curl *", "effect": "ask" },
+    { "action": "shell", "resource": "wget *", "effect": "ask" },
+    { "action": "shell", "resource": "ssh *", "effect": "ask" },
+    { "action": "shell", "resource": "scp *", "effect": "ask" },
+    { "action": "shell", "resource": "nc *", "effect": "ask" },
+
+    // Destructive local changes.
+    //
+    // `rm` asks. `mv` deliberately does NOT: renaming and moving files is
+    // routine refactoring work, it is recoverable, and prompting on it trains
+    // you to approve prompts reflexively — which defeats the prompts that
+    // matter. Delete asks; move does not.
+    { "action": "shell", "resource": "rm -rf *", "effect": "ask" },
+    { "action": "shell", "resource": "rm *", "effect": "ask" },
+    { "action": "shell", "resource": "chmod *", "effect": "ask" },
+    { "action": "shell", "resource": "chown *", "effect": "ask" },
+
+    // Dependency mutation. A new dependency changes the supply chain, so it is
+    // never automatic even though builds and test runs are.
+    { "action": "shell", "resource": "npm install*", "effect": "ask" },
+    { "action": "shell", "resource": "npm i *", "effect": "ask" },
+    { "action": "shell", "resource": "npm add*", "effect": "ask" },
+    { "action": "shell", "resource": "pnpm add*", "effect": "ask" },
+    { "action": "shell", "resource": "pnpm install*", "effect": "ask" },
+    { "action": "shell", "resource": "yarn add*", "effect": "ask" },
+    { "action": "shell", "resource": "bun add*", "effect": "ask" },
+    { "action": "shell", "resource": "pip install*", "effect": "ask" },
+    { "action": "shell", "resource": "uv add*", "effect": "ask" },
+    { "action": "shell", "resource": "uv sync*", "effect": "ask" },
+    { "action": "shell", "resource": "poetry add*", "effect": "ask" },
+    { "action": "shell", "resource": "cargo add*", "effect": "ask" },
+    { "action": "shell", "resource": "go get*", "effect": "ask" },
+    { "action": "shell", "resource": "gem install*", "effect": "ask" },
+
+    // Lockfiles are generated. Hand-editing one silently corrupts installs, and
+    // an agent rewriting one by hand is a classic failure.
+    { "action": "edit", "resource": "package-lock.json", "effect": "ask" },
+    { "action": "edit", "resource": "pnpm-lock.yaml", "effect": "ask" },
+    { "action": "edit", "resource": "yarn.lock", "effect": "ask" },
+    { "action": "edit", "resource": "bun.lock", "effect": "ask" },
+    { "action": "edit", "resource": "uv.lock", "effect": "ask" },
+    { "action": "edit", "resource": "poetry.lock", "effect": "ask" },
+    { "action": "edit", "resource": "Cargo.lock", "effect": "ask" },
+    { "action": "edit", "resource": "go.sum", "effect": "ask" },
+
+    // The brain is project-owned documentation. It is safe to write.
+    { "action": "edit", "resource": ".opencode/brain/**", "effect": "allow" }
+  ],
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BLOCK 3 — AGENT SCOPE
+  //
+  // THIS IS THE BLOCK YOU EDIT when your provider changes or you retune the
+  // setup. It ships filled in: every ID below is live right now, and
+  // `opencode debug agents` prints the model each unit actually resolves to.
+  //
+  // Values live here rather than in the ten agent files so this is one edit
+  // instead of ten — config `agents` merges over the Markdown agent and its
+  // scalar `model` wins.
+  //
+  // !! The merge applies to the SUBAGENT DISPATCH path only. `opencode run
+  // --agent <name>` ignores the per-agent model and uses the top-level `model`
+  // instead. Verified on v2.0.27: a `run --agent adjutant` session recorded
+  // big-pickle while adjutant's own entry says space-bunny-free. That is a
+  // CLI-path quirk, not a config bug — and it costs an afternoon to rediscover.
+  //
+  // WARROOM has no entry on purpose. It runs on the session default above, so
+  // one line moves every routing decision at once.
+  //
+  // How many models to pick: enough to cover the range — a fast one for
+  // retrieval, a strong one for the work you pay for, and a third only when a
+  // unit genuinely needs different behaviour. This setup uses four. Three is a
+  // fine answer. One is fine too, if you are on a paid account.
+  //
+  // Do not add a reasoning suffix such as `#high` on the strength of this
+  // file. Measured here over 3 trials, one free model scored 4.33 plain and
+  // 3.67 at `#high` — the higher-effort setting was worse. Re-measure on your
+  // own task before assuming effort buys anything.
+  //
+  // The measured spread behind these picks, on a 5-item reasoning task, n=3:
+  //
+  //   muse-spark-1.3-contributor-free 5.00    mimo-v2.6-flash-free 4.67
+  //   big-pickle 4.33                        space-bunny-free 3.00
+  //
+  // That task was reasoning on puzzles, NOT code editing. Read it as a starting
+  // point to re-measure from — not as a ranking, and not as a claim about how
+  // any of these models write code.
+  //
+  // WARNING: before swapping any ID in, confirm your provider has it, and that
+  // it is priced 0 if you are on a free tier. A model the provider does not
+  // have makes that agent fail to start, which is worse than no tiering at all.
+  // See .opencode/brain/pitfalls/model-catalog-is-not-truth.md.
+  //
+  // Models and agent scope share the single JSON `agents` key, so they are one
+  // block rather than two: model tiers first, cross-cutting scope last.
+  //
+  // Per-agent permissions live in `.opencode/agents/*.md` so each unit travels
+  // with its own file. Only cross-cutting overrides belong here.
+  // ─────────────────────────────────────────────────────────────────────────
+  "agents": {
+    // --- cross-cutting scope ---
+    // WARROOM may task the units but not itself. No recursive dispatch.
+    "warroom": {
+      "permissions": [{ "action": "subagent", "resource": "warroom", "effect": "deny" }]
+    }
+  }
+}
